@@ -20,8 +20,10 @@ canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #join input{font:inherit;width:calc(var(--u)*230);text-align:center;text-transform:uppercase;border:calc(var(--u)*4) solid var(--beige);border-radius:calc(var(--u)*16);padding:calc(var(--u)*8)}
 button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26)}
 #hint{margin:0;font-size:calc(var(--u)*28);color:#888;text-align:center;max-width:70%}
-#bar{position:absolute;left:1.5%;bottom:3%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*30);color:var(--blue)}
-#toast{position:absolute;left:50%;top:3%;transform:translateX(-50%);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26);border-radius:calc(var(--u)*16);font-size:calc(var(--u)*28);display:none}
+#bar{position:absolute;left:1.5%;bottom:3%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*30);color:var(--blue);z-index:2}
+#toast{position:absolute;left:50%;top:3%;transform:translateX(-50%);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26);border-radius:calc(var(--u)*16);font-size:calc(var(--u)*28);display:none;z-index:3}
+/* video disembunyikan dengan opacity (bukan display:none) agar browser tetap memperbarui frame */
+.hv{position:fixed;left:0;top:0;width:160px;height:90px;opacity:0;pointer-events:none;z-index:-1}
 </style>
 </head>
 <body>
@@ -37,17 +39,19 @@ button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);back
   <div id="toast"></div>
 </div>
 <input type="file" id="f" accept="image/*" hidden>
-<video id="v" playsinline muted style="display:none"></video>
+<video id="v" class="hv" playsinline muted autoplay></video>
+<video id="rv" class="hv" playsinline muted autoplay></video>
 
 <script type="module">
 import {HandLandmarker,FilesetResolver} from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
 
 const $=s=>document.querySelector(s);
-const cv=$('#c'),x=cv.getContext('2d'),stage=$('#stage'),vid=$('#v');
+const cv=$('#c'),x=cv.getContext('2d'),stage=$('#stage'),vid=$('#v'),rv=$('#rv');
 const C={blue:'#64a3c8',purple:'#c486be',coral:'#f06e7d',beige:'#dec4af',btn:'#4eaffc',gray:'#999'};
 const COL3=[C.blue,C.purple,C.coral];
 const W=1600,H=900,PW=778,PH=432;
-const FR={x:810,y:12},ME={x:810,y:456},CAM={x:12,y:12,w:778,h:876};
+// kolom kanan: puzzle teman (atas) dan puzzle kamu (bawah); kolom kiri: kamera teman (atas) dan kameramu (bawah)
+const FR={x:810,y:12},ME={x:810,y:456},RCAM={x:12,y:12,w:778,h:432},CAM={x:12,y:456,w:778,h:432};
 const COLS=7,ROWS=5,DX=60,R=28,STEP=52,TRAYN=10,SNAP=26,N=COLS*ROWS;
 const BW=(COLS-1)*STEP+DX,BH=ROWS*DX+DX/2,BX=20,BY=88;
 const TR={x0:440,x1:730,y0:90,y1:322};
@@ -148,18 +152,27 @@ const pup=e=>{if(screen!=='game')return;const[a,b]=lp(e),id=pid(e);if(!ptr[id])r
 cv.addEventListener('pointerup',pup);cv.addEventListener('pointercancel',pup);
 
 // ---------- kamera + tangan
-let hl=null,camOK=false,lastT=-1,res=null,hstatus='Memuat model tangan...';
+let hl=null,camOK=false,lastT=-1,res=null,hstatus='Memuat kamera...',localStream=null,remoteOK=false;
+const camReady=(async()=>{
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Butuh HTTPS atau localhost');
+    localStream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false});
+    vid.srcObject=localStream;
+    try{await vid.play()}catch(e){}
+    camOK=true;hstatus='Memuat model tangan...';
+  }catch(e){hstatus='Kamera gagal: '+(e.name||e.message)+'. Pakai mouse/sentuh'}
+})();
 (async()=>{
-  try{const s=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,facingMode:'user'},audio:false});
-    vid.srcObject=s;await vid.play();camOK=true}catch(e){hstatus='Kamera tidak tersedia, pakai mouse atau sentuh'}
+  await camReady;
   try{const fs=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
     const opt=d=>({baseOptions:{modelAssetPath:MODEL,delegate:d},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.6,minHandPresenceConfidence:.6,minTrackingConfidence:.6});
     try{hl=await HandLandmarker.createFromOptions(fs,opt('GPU'))}catch(e){hl=await HandLandmarker.createFromOptions(fs,opt('CPU'))}
     if(camOK)hstatus='Cubit jempol + telunjuk untuk mengambil potongan'}
-  catch(e){hstatus='Model tangan gagal dimuat (cek internet)'}
+  catch(e){if(camOK)hstatus='Model tangan gagal dimuat (cek internet)'}
 })();
 function hands(){
-  if(hl&&camOK&&vid.readyState>=2&&vid.currentTime!==lastT){lastT=vid.currentTime;res=hl.detectForVideo(vid,performance.now())}
+  if(hl&&camOK&&vid.readyState>=2&&vid.currentTime!==lastT){lastT=vid.currentTime;
+    try{res=hl.detectForVideo(vid,performance.now())}catch(e){}}
   const dets=[];
   if(screen==='game'&&res&&res.landmarks)for(const L of res.landmarks){
     const a=L[4],b=L[8],sc=Math.hypot(L[0].x-L[9].x,L[0].y-L[9].y)+1e-6;
@@ -179,12 +192,29 @@ function hands(){
 let peer=null,conn=null,code=null,role='';
 const ALPHA='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const rcode=()=>Array.from({length:5},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join('');
+
+function attachCall(call){
+  call.on('stream',s=>{rv.srcObject=s;rv.play().catch(()=>{});remoteOK=true});
+  call.on('close',()=>{remoteOK=false;rv.srcObject=null});
+  call.on('error',()=>{remoteOK=false});
+}
+async function outStream(){
+  await camReady;
+  return localStream||document.createElement('canvas').captureStream(1);
+}
+async function callHost(){
+  const s=await outStream();
+  attachCall(peer.call('ppz-'+code,s));
+}
+
 function setConn(c){
   conn=c;
-  c.on('open',()=>{updateBar();if(role==='host'&&imgData)c.send({t:'start',img:imgData});
+  c.on('open',()=>{updateBar();
+    if(role==='host'&&imgData)c.send({t:'start',img:imgData});
+    if(role==='guest')callHost();
     if(screen==='welcome')$('#hint').textContent='Terhubung dengan teman. Menunggu foto, atau upload fotomu sendiri.'});
   c.on('data',onData);
-  c.on('close',()=>{conn=null;fr=mkState();frCur=[];updateBar()});
+  c.on('close',()=>{conn=null;fr=mkState();frCur=[];remoteOK=false;rv.srcObject=null;updateBar()});
 }
 function onData(m){
   if(m.t==='start'){const im=new Image();im.onload=()=>begin(im,m.img,true);im.src=m.img}
@@ -197,6 +227,7 @@ function hostRoom(){
   role='host';code=rcode();
   peer=new Peer('ppz-'+code);
   peer.on('connection',c=>setConn(c));
+  peer.on('call',async call=>{call.answer(await outStream());attachCall(call)});
   peer.on('open',updateBar);
   peer.on('error',e=>{if(e.type==='unavailable-id'){peer=null;hostRoom()}else toast('Koneksi online bermasalah: '+e.type)});
 }
@@ -259,6 +290,19 @@ function drawPanel(P,S,mine){
     colorText(winner==='me'?(conn&&conn.open?'KAMU MENANG!':'SELESAI!'):'TEMAN MENANG!',PW/2,PH/2,64)}
   x.restore();
 }
+function drawRemoteCam(){
+  x.save();rr(RCAM.x,RCAM.y,RCAM.w,RCAM.h,18);x.lineWidth=5;x.strokeStyle=C.beige;x.stroke();
+  if(remoteOK&&rv.videoWidth){
+    const s=Math.min(RCAM.w/rv.videoWidth,RCAM.h/rv.videoHeight),w=rv.videoWidth*s,h=rv.videoHeight*s,
+          ox=RCAM.x+(RCAM.w-w)/2,oy=RCAM.y+(RCAM.h-h)/2;
+    x.drawImage(rv,ox,oy,w,h);
+  }else{
+    person(RCAM.x+RCAM.w/2,RCAM.y+RCAM.h/2-20,110);
+    x.textAlign='center';x.textBaseline='middle';x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
+    x.fillText(conn&&conn.open?'Menyambungkan kamera teman...':'Menunggu teman...',RCAM.x+RCAM.w/2,RCAM.y+RCAM.h-40);
+  }
+  x.restore();
+}
 function drawCam(){
   x.save();rr(CAM.x,CAM.y,CAM.w,CAM.h,18);x.lineWidth=5;x.strokeStyle=C.beige;x.stroke();
   if(camOK&&vid.videoWidth){
@@ -268,9 +312,9 @@ function drawCam(){
       const P=L.map(l=>[ox+(1-l.x)*w,oy+l.y*h]);x.lineWidth=2.5;x.strokeStyle=C.blue;x.beginPath();
       for(const[a,b]of LINES){x.moveTo(...P[a]);x.lineTo(...P[b])}x.stroke();
       for(const i of[4,8]){x.beginPath();x.arc(P[i][0],P[i][1],8,0,7);x.fillStyle=C.coral;x.fill()}}
-  }else person(CAM.x+CAM.w/2,CAM.y+CAM.h/2-40,220);
+  }else person(CAM.x+CAM.w/2,CAM.y+CAM.h/2-10,110);
   x.textAlign='center';x.textBaseline='middle';x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
-  x.fillText(hstatus,CAM.x+CAM.w/2,CAM.y+CAM.h-170);
+  x.fillText(hstatus,CAM.x+CAM.w/2,CAM.y+CAM.h-30);
   const el=Math.max(0,((tFin||performance.now())-t0)/1000|0);
   x.fillStyle=C.blue;x.font='44px Chewy,system-ui';
   x.fillText(String(el/60|0).padStart(2,'0')+':'+String(el%60).padStart(2,'0'),CAM.x+CAM.w/2,CAM.y+70);
@@ -283,9 +327,11 @@ function cursors(){
     x.beginPath();x.arc(p.x,p.y,4,0,7);x.fillStyle='#fff';x.fill()}
 }
 function frame(){
-  hands();
-  x.clearRect(0,0,W,H);
-  if(screen==='game'){drawCam();drawPanel(FR,fr,false);drawPanel(ME,me,true);cursors()}
+  try{
+    hands();
+    x.clearRect(0,0,W,H);
+    if(screen==='game'){drawRemoteCam();drawCam();drawPanel(FR,fr,false);drawPanel(ME,me,true);cursors()}
+  }catch(e){console.error(e)}
   requestAnimationFrame(frame);
 }
 (document.fonts?document.fonts.load('30px Chewy'):Promise.resolve()).finally(frame);
