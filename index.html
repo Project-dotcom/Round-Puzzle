@@ -20,7 +20,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #join input{font:inherit;width:calc(var(--u)*230);text-align:center;text-transform:uppercase;border:calc(var(--u)*4) solid var(--beige);border-radius:calc(var(--u)*16);padding:calc(var(--u)*8)}
 button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26)}
 #hint{margin:0;font-size:calc(var(--u)*28);color:#888;text-align:center;max-width:70%}
-#bar{position:absolute;left:1.5%;bottom:3%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*30);color:var(--blue);z-index:2}
+#bar{position:absolute;left:2%;top:2%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*30);color:var(--blue);z-index:2}
 #toast{position:absolute;left:50%;top:3%;transform:translateX(-50%);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26);border-radius:calc(var(--u)*16);font-size:calc(var(--u)*28);display:none;z-index:3}
 /* video disembunyikan dengan opacity (bukan display:none) agar browser tetap memperbarui frame */
 .hv{position:fixed;left:0;top:0;width:160px;height:90px;opacity:0;pointer-events:none;z-index:-1}
@@ -76,7 +76,8 @@ function colorText(t,cx,cy,size){x.font=`${size}px Chewy,system-ui`;x.textAlign=
   [...t].forEach((c,i)=>{x.fillStyle=COL3[i%3];x.fillText(c,px,cy);px+=ws[i]})}
 
 // ---------- state puzzle
-const mkState=()=>({placed:Array(N).fill(false),pos:Array(N).fill([0,0]),tray:[],queue:[],held:new Set()});
+const mkState=()=>({placed:Array(N).fill(false),pos:Array(N).fill([0,0]),home:Array(N).fill(null),tray:[],queue:[],held:new Set()});
+const SLOTS=[];for(let r=0;r<3;r++)for(let c=0;c<4;c++)SLOTS.push([470+c*66,130+r*72]);
 let me=mkState(),fr=mkState(),frCur=[],frDone=false;
 let sprites=[],targets=[],preview=null,screen='welcome',t0=0,tFin=0,winner=null,imgData=null;
 
@@ -96,17 +97,15 @@ function build(img){
   const p=preview.getContext('2d'),ps=Math.max(PREV[2]/img.width,PREV[3]/img.height);
   p.drawImage(img,(PREV[2]-img.width*ps)/2,(PREV[3]-img.height*ps)/2,img.width*ps,img.height*ps);
 }
-function freeSpot(){let best=null;
-  for(let k=0;k<80;k++){const p=[TR.x0+Math.random()*(TR.x1-TR.x0),TR.y0+Math.random()*(TR.y1-TR.y0)];
-    const d=Math.min(999,...me.tray.map(i=>dist(p,me.pos[i])));if(d>=DX*.85)return p;if(!best||d>best[0])best=[d,p]}
-  return best[1]}
-function refill(){while(me.tray.length<TRAYN&&me.queue.length){const i=me.queue.shift();me.pos[i]=freeSpot();me.tray.push(i)}}
+function freeSlot(){return SLOTS.find(sl=>!me.tray.some(i=>me.home[i]===sl))||SLOTS[0]}
+function refill(){while(me.tray.length<TRAYN&&me.queue.length){const i=me.queue.shift(),sl=freeSlot();me.home[i]=sl;me.pos[i]=sl;me.tray.push(i)}}
 function resetMe(){me=mkState();const a=[...Array(N).keys()];
   for(let i=N-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
   me.queue=a;refill()}
 function drop(i){
   if(dist(me.pos[i],targets[i])<SNAP){me.pos[i]=targets[i];me.placed[i]=true;me.tray.splice(me.tray.indexOf(i),1);refill();
-    if(me.placed.every(Boolean)&&!tFin){tFin=performance.now();if(!winner)winner='me'}}}
+    if(me.placed.every(Boolean)&&!tFin){tFin=performance.now();if(!winner)winner='me'}}
+  else me.pos[i]=me.home[i]}
 function begin(img,data,fromNet){
   imgData=data;build(img);resetMe();fr=mkState();frCur=[];frDone=false;winner=null;tFin=0;t0=performance.now();
   screen='game';$('#welcome').style.display='none';
@@ -146,24 +145,37 @@ function upd(id,px,py,down){
   p.down=down}
 const pid=e=>e.pointerType==='mouse'?'mouse':'t'+e.pointerId;
 const lp=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)/r.width*W,(e.clientY-r.top)/r.height*H]};
-cv.addEventListener('pointerdown',e=>{if(screen!=='game')return;cv.setPointerCapture(e.pointerId);const[a,b]=lp(e);upd(pid(e),a,b,true)});
+cv.addEventListener('pointerdown',e=>{if(screen!=='game')return;const[a,b]=lp(e);
+  if(!camOK&&a>=CAM.x&&a<=CAM.x+CAM.w&&b>=CAM.y&&b<=CAM.y+CAM.h){camReady=startCam();return}
+  cv.setPointerCapture(e.pointerId);upd(pid(e),a,b,true)});
 cv.addEventListener('pointermove',e=>{if(screen!=='game')return;const[a,b]=lp(e),id=pid(e);upd(id,a,b,!!(ptr[id]&&ptr[id].down))});
 const pup=e=>{if(screen!=='game')return;const[a,b]=lp(e),id=pid(e);if(!ptr[id])return;upd(id,a,b,false);if(id!=='mouse')delete ptr[id]};
 cv.addEventListener('pointerup',pup);cv.addEventListener('pointercancel',pup);
 
 // ---------- kamera + tangan
-let hl=null,camOK=false,lastT=-1,res=null,hstatus='Memuat kamera...',localStream=null,remoteOK=false;
-const camReady=(async()=>{
-  try{
-    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Butuh HTTPS atau localhost');
-    localStream=await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false});
-    vid.srcObject=localStream;
-    try{await vid.play()}catch(e){}
-    camOK=true;hstatus='Memuat model tangan...';
-  }catch(e){hstatus='Kamera gagal: '+(e.name||e.message)+'. Pakai mouse/sentuh'}
-})();
+let hl=null,camOK=false,lastT=-1,res=null,hstatus='Memuat kamera...',camErr='',camHelp='',localStream=null,remoteOK=false;
+const HELP={NotAllowedError:'Izin kamera diblokir: klik ikon gembok di address bar, izinkan Kamera, lalu klik kotak ini',
+  NotFoundError:'Tidak ada kamera terdeteksi di perangkat ini',
+  NotReadableError:'Kamera sedang dipakai aplikasi/tab lain (Zoom, WhatsApp, tab lain). Tutup lalu klik kotak ini',
+  SecurityError:'Kamera diblokir oleh kebijakan halaman (iframe/HTTPS)'};
+async function startCam(){
+  camOK=false;camErr='';camHelp='';hstatus='Meminta izin kamera...';
+  if(localStream){localStream.getTracks().forEach(t=>t.stop());localStream=null}
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){hstatus='Kamera gagal';camErr='Butuh HTTPS atau localhost';return}
+  const tries=[{video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false},{video:true,audio:false}];
+  for(const c of tries){
+    try{
+      localStream=await navigator.mediaDevices.getUserMedia(c);
+      vid.srcObject=localStream;
+      try{await vid.play()}catch(e){}
+      camOK=true;hstatus=hl?'Cubit jempol + telunjuk untuk mengambil potongan':'Memuat model tangan...';
+      return;
+    }catch(e){camErr=(e.name||'Error')+(e.message?' - '+e.message:'');camHelp=HELP[e.name]||''}
+  }
+  hstatus='Kamera gagal (klik kotak ini untuk coba lagi)';
+}
+let camReady=startCam();
 (async()=>{
-  await camReady;
   try{const fs=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
     const opt=d=>({baseOptions:{modelAssetPath:MODEL,delegate:d},runningMode:'VIDEO',numHands:2,minHandDetectionConfidence:.6,minHandPresenceConfidence:.6,minTrackingConfidence:.6});
     try{hl=await HandLandmarker.createFromOptions(fs,opt('GPU'))}catch(e){hl=await HandLandmarker.createFromOptions(fs,opt('CPU'))}
@@ -314,7 +326,11 @@ function drawCam(){
       for(const i of[4,8]){x.beginPath();x.arc(P[i][0],P[i][1],8,0,7);x.fillStyle=C.coral;x.fill()}}
   }else person(CAM.x+CAM.w/2,CAM.y+CAM.h/2-10,110);
   x.textAlign='center';x.textBaseline='middle';x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
-  x.fillText(hstatus,CAM.x+CAM.w/2,CAM.y+CAM.h-30);
+  x.fillText(hstatus,CAM.x+CAM.w/2,CAM.y+CAM.h-(camErr?96:30));
+  if(camErr){x.font='20px Chewy,system-ui';x.fillStyle=C.coral;
+    const wrap=(t,y)=>{let ln='',yy=y;for(const w of t.split(' ')){if(x.measureText(ln+w).width>CAM.w-60){x.fillText(ln,CAM.x+CAM.w/2,yy);ln='';yy+=24}ln+=w+' '}x.fillText(ln,CAM.x+CAM.w/2,yy)};
+    wrap(camHelp||camErr.slice(0,90),CAM.y+CAM.h-66);
+    x.font='16px Chewy,system-ui';x.fillStyle=C.gray;x.fillText(camErr.slice(0,80),CAM.x+CAM.w/2,CAM.y+CAM.h-14)}
   const el=Math.max(0,((tFin||performance.now())-t0)/1000|0);
   x.fillStyle=C.blue;x.font='44px Chewy,system-ui';
   x.fillText(String(el/60|0).padStart(2,'0')+':'+String(el%60).padStart(2,'0'),CAM.x+CAM.w/2,CAM.y+70);
