@@ -113,7 +113,7 @@ function begin(img,data,fromNet){
   if(!fromNet&&conn&&conn.open)conn.send({t:'start',img:data});
   updateBar();
 }
-function toWelcome(){screen='welcome';$('#welcome').style.display='flex';$('#bar').style.display='none';
+function toWelcome(){screen='welcome';$('#welcome').style.display='flex';updateBar();
   for(const k in ptr){upd(k,ptr[k].x,ptr[k].y,false)}}
 
 // ---------- upload
@@ -219,16 +219,27 @@ async function callHost(){
   attachCall(peer.call('ppz-'+code,s));
 }
 
+let lastSeen=0,wasOn=false;
+function friendOn(){return !!(conn&&conn.open&&performance.now()-lastSeen<6000)}
+function enterGame(){if(screen!=='game'){screen='game';$('#welcome').style.display='none';t0=performance.now()}}
 function setConn(c){
   conn=c;
-  c.on('open',()=>{updateBar();
+  c.on('open',()=>{lastSeen=performance.now();enterGame();updateBar();
     if(role==='host'&&imgData)c.send({t:'start',img:imgData});
-    if(role==='guest')callHost();
-    if(screen==='welcome')$('#hint').textContent='Terhubung dengan teman. Menunggu foto, atau upload fotomu sendiri.'});
+    if(role==='guest')callHost()});
   c.on('data',onData);
-  c.on('close',()=>{conn=null;fr=mkState();frCur=[];remoteOK=false;rv.srcObject=null;updateBar()});
+  c.on('close',()=>{if(conn===c){conn=null;fr=mkState();frCur=[];remoteOK=false;rv.srcObject=null;updateBar();
+    if(role==='guest')setTimeout(reconnect,2000)}});
+  c.on('error',()=>{});
+}
+function reconnect(){
+  if(role!=='guest'||friendOn()||!peer||peer.destroyed)return;
+  if(peer.disconnected){try{peer.reconnect()}catch(e){}}
+  if(peer.open)setConn(peer.connect('ppz-'+code,{reliable:true}));
+  setTimeout(reconnect,3000);
 }
 function onData(m){
+  lastSeen=performance.now();
   if(m.t==='start'){const im=new Image();im.onload=()=>begin(im,m.img,true);im.src=m.img}
   else if(m.t==='s'){
     const f=mkState();m.pl.forEach(i=>f.placed[i]=true);
@@ -241,6 +252,7 @@ function hostRoom(){
   peer.on('connection',c=>setConn(c));
   peer.on('call',async call=>{call.answer(await outStream());attachCall(call)});
   peer.on('open',updateBar);
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
   peer.on('error',e=>{if(e.type==='unavailable-id'){peer=null;hostRoom()}else toast('Koneksi online bermasalah: '+e.type)});
 }
 function joinRoom(cd){
@@ -248,15 +260,24 @@ function joinRoom(cd){
   role='guest';code=cd;
   peer=new Peer();
   peer.on('open',()=>{setConn(peer.connect('ppz-'+cd,{reliable:true}))});
-  peer.on('error',e=>{toast(e.type==='peer-unavailable'?'Ruang tidak ditemukan':'Koneksi bermasalah: '+e.type)});
+  peer.on('error',e=>{if(e.type==='peer-unavailable'){toast('Ruang belum ditemukan, mencoba lagi...');setTimeout(()=>{if(peer&&peer.open&&!friendOn())setConn(peer.connect('ppz-'+cd,{reliable:true}))},3000)}else toast('Koneksi bermasalah: '+e.type)});
+  peer.on('disconnected',()=>{try{peer.reconnect()}catch(e){}});
   $('#hint').textContent='Menyambung ke ruang '+cd+'...';
 }
 $('#joinBtn').onclick=()=>joinRoom($('#code').value);
 $('#copy').onclick=()=>{const l=location.origin+location.pathname+'?room='+code;
   (navigator.clipboard?navigator.clipboard.writeText(l):Promise.reject()).then(()=>toast('Link disalin'),()=>prompt('Salin link ini:',l))};
 function updateBar(){const b=$('#bar');
-  if(screen!=='game'||!code||role!=='host'){b.style.display='none';return}
-  b.style.display='flex';$('#barTxt').textContent=conn&&conn.open?'Teman terhubung':'Kode ruang: '+code}
+  if(!code){b.style.display='none';return}
+  b.style.display='flex';
+  $('#barTxt').textContent='Kode ruang: '+code+'  |  '+(friendOn()?'Teman online':'Menunggu teman...')}
+// refresh status tiap 1 detik + heartbeat
+setInterval(()=>{
+  if(conn&&conn.open){try{conn.send({t:'p'})}catch(e){}}
+  const on=friendOn();
+  if(on!==wasOn){wasOn=on;toast(on?'Teman bergabung!':'Teman terputus')}
+  updateBar();
+},1000);
 setInterval(()=>{
   if(!conn||!conn.open||screen!=='game')return;
   conn.send({t:'s',pl:me.placed.flatMap((v,i)=>v?[i]:[]),
@@ -265,7 +286,7 @@ setInterval(()=>{
     d:winner==='me'||tFin?1:0});
 },100);
 const q=new URLSearchParams(location.search).get('room');
-if(q){$('#code').value=q.toUpperCase();joinRoom(q)}
+if(q){$('#code').value=q.toUpperCase();joinRoom(q)}else hostRoom();
 
 // ---------- gambar
 function person(cx,cy,s){x.fillStyle='#e6e6e6';x.beginPath();x.arc(cx,cy-s*.3,s*.32,0,7);x.fill();
@@ -275,13 +296,14 @@ function drawPanel(P,S,mine){
   rr(0,0,PW,PH,18);x.lineWidth=5;x.strokeStyle=C.beige;x.stroke();
   x.textBaseline='middle';x.textAlign='center';x.font='30px Chewy,system-ui';x.fillStyle=mine?C.blue:C.coral;
   x.fillText(mine?'KAMU':'TEMAN',PW/2,28);
-  if(!mine&&!(conn&&conn.open)){
+  if(!mine&&!friendOn()){
     person(PW/2,PH/2-10,110);x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
-    x.fillText(role==='host'?'Menunggu teman... kode: '+code:'Belum ada teman terhubung',PW/2,PH-40);x.restore();return}
+    x.fillText(role==='host'?'Menunggu teman... kode: '+code:'Menyambung ke teman...',PW/2,PH-40);x.restore();return}
   if(preview){x.drawImage(preview,PREV[0],PREV[1]);x.lineWidth=3;x.strokeStyle=C.blue;x.strokeRect(PREV[0],PREV[1],PREV[2],PREV[3])}
   x.textAlign='left';x.font='34px Chewy,system-ui';x.fillStyle=C.blue;
   x.fillText(S.placed.filter(Boolean).length+' / '+N,PREV[0]+PREV[2]+14,PREV[1]+36);
   if(mine){
+    if(!sprites.length){x.fillStyle=C.gray;x.font='32px Chewy,system-ui';x.textAlign='center';x.fillText('Upload foto untuk mulai (tombol kanan bawah)',PW/2,PH/2)}
     x.lineWidth=4;x.strokeStyle=C.blue;rr(...BACK,10);x.stroke();
     x.beginPath();x.moveTo(BACK[0]+38,BACK[1]+26);x.lineTo(BACK[0]+14,BACK[1]+26);x.moveTo(BACK[0]+24,BACK[1]+16);x.lineTo(BACK[0]+14,BACK[1]+26);x.lineTo(BACK[0]+24,BACK[1]+36);x.stroke();
     x.fillStyle=C.btn;x.fillRect(...UP);x.fillStyle='#fff';x.font='17px Chewy,system-ui';x.textAlign='center';
@@ -299,7 +321,7 @@ function drawPanel(P,S,mine){
   if(!mine)for(const c of frCur){x.beginPath();x.arc(c[0],c[1],12,0,7);x.lineWidth=3;x.strokeStyle=C.coral;
     if(c[2]){x.fillStyle=C.coral;x.fill()}else x.stroke()}
   if(mine&&tFin){x.fillStyle='rgba(255,255,255,.88)';rr(30,PH/2-60,PW-60,120,24);x.fill();
-    colorText(winner==='me'?(conn&&conn.open?'KAMU MENANG!':'SELESAI!'):'TEMAN MENANG!',PW/2,PH/2,64)}
+    colorText(winner==='me'?(friendOn()?'KAMU MENANG!':'SELESAI!'):'TEMAN MENANG!',PW/2,PH/2,64)}
   x.restore();
 }
 function drawRemoteCam(){
@@ -311,7 +333,7 @@ function drawRemoteCam(){
   }else{
     person(RCAM.x+RCAM.w/2,RCAM.y+RCAM.h/2-20,110);
     x.textAlign='center';x.textBaseline='middle';x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
-    x.fillText(conn&&conn.open?'Menyambungkan kamera teman...':'Menunggu teman...',RCAM.x+RCAM.w/2,RCAM.y+RCAM.h-40);
+    x.fillText(friendOn()?'Menyambungkan kamera teman...':'Menunggu teman...',RCAM.x+RCAM.w/2,RCAM.y+RCAM.h-40);
   }
   x.restore();
 }
