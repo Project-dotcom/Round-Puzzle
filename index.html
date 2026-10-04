@@ -20,9 +20,8 @@ canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #join input{font:inherit;width:calc(var(--u)*230);text-align:center;text-transform:uppercase;border:calc(var(--u)*4) solid var(--beige);border-radius:calc(var(--u)*16);padding:calc(var(--u)*8)}
 button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26)}
 #hint{margin:0;font-size:calc(var(--u)*28);color:#888;text-align:center;max-width:70%}
-#bar{position:absolute;left:2%;top:2%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*30);color:var(--blue);z-index:2}
+#bar{position:absolute;left:2%;top:2%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*28);color:var(--blue);z-index:2}
 #toast{position:absolute;left:50%;top:3%;transform:translateX(-50%);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26);border-radius:calc(var(--u)*16);font-size:calc(var(--u)*28);display:none;z-index:3}
-/* video disembunyikan dengan opacity (bukan display:none) agar browser tetap memperbarui frame */
 .hv{position:fixed;left:0;top:0;width:160px;height:90px;opacity:0;pointer-events:none;z-index:-1}
 </style>
 </head>
@@ -33,7 +32,7 @@ button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);back
     <h1 id="title"></h1>
     <label id="up" for="f"><i>&#8593;</i>UPLOAD</label>
     <div id="join">atau gabung ke teman: <input id="code" maxlength="5" placeholder="KODE"><button id="joinBtn">GABUNG</button></div>
-    <p id="hint">Upload foto untuk mulai. Tombol upload harus diklik dengan mouse atau layar sentuh.</p>
+    <p id="hint">Upload foto untuk mulai. Kalian akan menyusun 1 puzzle yang sama secara bersamaan.</p>
   </div>
   <div id="bar"><span id="barTxt"></span><button id="copy">Salin link undangan</button></div>
   <div id="toast"></div>
@@ -49,13 +48,14 @@ const $=s=>document.querySelector(s);
 const cv=$('#c'),x=cv.getContext('2d'),stage=$('#stage'),vid=$('#v'),rv=$('#rv');
 const C={blue:'#64a3c8',purple:'#c486be',coral:'#f06e7d',beige:'#dec4af',btn:'#4eaffc',gray:'#999'};
 const COL3=[C.blue,C.purple,C.coral];
-const W=1600,H=900,PW=778,PH=432;
-// kolom kanan: puzzle teman (atas) dan puzzle kamu (bawah); kolom kiri: kamera teman (atas) dan kameramu (bawah)
-const FR={x:810,y:12},ME={x:810,y:456},RCAM={x:12,y:12,w:778,h:432},CAM={x:12,y:456,w:778,h:432};
-const COLS=7,ROWS=5,DX=60,R=28,STEP=52,TRAYN=10,SNAP=26,N=COLS*ROWS;
-const BW=(COLS-1)*STEP+DX,BH=ROWS*DX+DX/2,BX=20,BY=88;
-const TR={x0:440,x1:730,y0:90,y1:322};
-const BACK=[PW-62,10,52,52],UP=[PW-84,PH-84,72,72],PREV=[20,12,80,70];
+const W=1600,H=900,PW=778,PH=876;
+// kiri: kamera teman (atas) + kameramu (bawah). kanan: 1 puzzle bersama.
+const PAN={x:810,y:12},RCAM={x:12,y:12,w:778,h:432},CAM={x:12,y:456,w:778,h:432};
+const COLS=7,ROWS=5,DX=80,R=38,STEP=70,SNAP=34,N=COLS*ROWS;
+const BW=(COLS-1)*STEP+DX,BH=ROWS*DX+DX/2,BX=(PW-BW)/2,BY=84;
+const SLOTS=[];for(let r=0;r<3;r++)for(let c=0;c<7;c++)SLOTS.push([89+c*100,600+r*96]);
+const TRAYN=SLOTS.length;
+const BACK=[PW-62,10,52,52],UP=[PW-90,BY+BH-70,72,72],PREV=[14,12,80,70];
 const PINCH_ON=.30,PINCH_OFF=.50,MARG=.10,SMOOTH=.55;
 const LINES=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 const MODEL='https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
@@ -75,11 +75,18 @@ function colorText(t,cx,cy,size){x.font=`${size}px Chewy,system-ui`;x.textAlign=
   [...t].forEach((c,i)=>{x.strokeText(c,px,cy);px+=ws[i]});px=cx-tot/2;
   [...t].forEach((c,i)=>{x.fillStyle=COL3[i%3];x.fillText(c,px,cy);px+=ws[i]})}
 
-// ---------- state puzzle
-const mkState=()=>({placed:Array(N).fill(false),pos:Array(N).fill([0,0]),home:Array(N).fill(null),tray:[],queue:[],held:new Set()});
-const SLOTS=[];for(let r=0;r<3;r++)for(let c=0;c<4;c++)SLOTS.push([470+c*66,130+r*72]);
-let me=mkState(),fr=mkState(),frCur=[],frDone=false;
-let sprites=[],targets=[],preview=null,screen='welcome',t0=0,tFin=0,winner=null,imgData=null;
+// ---------- state puzzle BERSAMA (1 papan untuk 2 pemain)
+let sprites=[],targets=[],preview=null,screen='welcome',t0=0,tFin=0,imgData=null;
+let gid=0,ord=[],oidx=[],placed=Array(N).fill(false);
+const hpos={};          // potongan yang sedang kupegang: i -> [x,y]
+let rheld={},frCur=[];  // potongan & kursor teman
+let trayVis=[];
+const placedList=()=>placed.flatMap((v,i)=>v?[i]:[]);
+const curPos=i=>hpos[i]||rheld[i]||SLOTS[oidx[i]%TRAYN];
+// Potongan ke-k di urutan acak menempati slot k%TRAYN; slot menampilkan potongan pertama yang belum terpasang.
+// Karena deterministik, kedua pemain selalu melihat isi baki yang sama tanpa perlu sinkron tambahan.
+function calcTray(){trayVis=[];if(!ord.length)return;const seen=new Set();
+  for(const i of ord){if(placed[i])continue;const s=oidx[i]%TRAYN;if(!seen.has(s)){seen.add(s);trayVis.push(i)}}}
 
 function build(img){
   const b=document.createElement('canvas');b.width=BW;b.height=BH;const g=b.getContext('2d');
@@ -97,21 +104,20 @@ function build(img){
   const p=preview.getContext('2d'),ps=Math.max(PREV[2]/img.width,PREV[3]/img.height);
   p.drawImage(img,(PREV[2]-img.width*ps)/2,(PREV[3]-img.height*ps)/2,img.width*ps,img.height*ps);
 }
-function freeSlot(){return SLOTS.find(sl=>!me.tray.some(i=>me.home[i]===sl))||SLOTS[0]}
-function refill(){while(me.tray.length<TRAYN&&me.queue.length){const i=me.queue.shift(),sl=freeSlot();me.home[i]=sl;me.pos[i]=sl;me.tray.push(i)}}
-function resetMe(){me=mkState();const a=[...Array(N).keys()];
-  for(let i=N-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
-  me.queue=a;refill()}
-function drop(i){
-  if(dist(me.pos[i],targets[i])<SNAP){me.pos[i]=targets[i];me.placed[i]=true;me.tray.splice(me.tray.indexOf(i),1);refill();
-    if(me.placed.every(Boolean)&&!tFin){tFin=performance.now();if(!winner)winner='me'}}
-  else me.pos[i]=me.home[i]}
-function begin(img,data,fromNet){
-  imgData=data;build(img);resetMe();fr=mkState();frCur=[];frDone=false;winner=null;tFin=0;t0=performance.now();
+const startMsg=()=>({t:'start',img:imgData,ord,g:gid,pl:placedList()});
+function begin(img,data,fromNet,m){
+  imgData=data;build(img);
+  gid=m?m.g:Date.now();
+  if(m)ord=m.ord;else{ord=[...Array(N).keys()];for(let i=N-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[ord[i],ord[j]]=[ord[j],ord[i]]}}
+  oidx=[];ord.forEach((i,k)=>oidx[i]=k);
+  placed=Array(N).fill(false);((m&&m.pl)||[]).forEach(i=>placed[i]=true);
+  for(const k in hpos)delete hpos[k];
+  for(const k in ptr)ptr[k].held=null;
+  rheld={};frCur=[];tFin=0;t0=performance.now();
   screen='game';$('#welcome').style.display='none';
   if(!peer)hostRoom();
-  if(!fromNet&&conn&&conn.open)conn.send({t:'start',img:data});
-  updateBar();
+  if(!fromNet&&conn&&conn.open)conn.send(startMsg());
+  calcTray();updateBar();
 }
 function toWelcome(){screen='welcome';$('#welcome').style.display='flex';updateBar();
   for(const k in ptr){upd(k,ptr[k].x,ptr[k].y,false)}}
@@ -131,15 +137,16 @@ $('#f').addEventListener('change',e=>{
 const ptr={};let hid=0;
 function upd(id,px,py,down){
   const p=ptr[id]||(ptr[id]={x:px,y:py,down:false,held:null,up:false});p.x=px;p.y=py;
-  const l=[px-ME.x,py-ME.y];
+  const l=[px-PAN.x,py-PAN.y];
   if(down&&!p.down){
     if(inR(l,BACK))toWelcome();
     else if(inR(l,UP))p.up=true;
-    else for(let k=me.tray.length-1;k>=0;k--){const i=me.tray[k];
-      if(!me.held.has(i)&&dist(l,me.pos[i])<=R+8){p.held=i;me.held.add(i);me.tray.splice(k,1);me.tray.push(i);break}}
-  }else if(down&&p.held!=null){me.pos[p.held]=[cl2(l[0],R,PW-R),cl2(l[1],R,PH-R)]}
+    else for(let k=trayVis.length-1;k>=0;k--){const i=trayVis[k];
+      if(!hpos[i]&&!rheld[i]&&dist(l,curPos(i))<=R+10){p.held=i;hpos[i]=curPos(i).slice();break}}
+  }else if(down&&p.held!=null){hpos[p.held]=[cl2(l[0],R,PW-R),cl2(l[1],R,PH-R)]}
   else if(!down&&p.down){
-    if(p.held!=null){me.held.delete(p.held);drop(p.held);p.held=null}
+    if(p.held!=null){const i=p.held,pos=hpos[i];p.held=null;delete hpos[i];
+      if(pos&&!placed[i]&&dist(pos,targets[i])<SNAP){placed[i]=true;calcTray()}}
     if(p.up&&inR(l,UP)){if(id[0]==='h')toast('Tombol upload harus diklik dengan mouse atau layar sentuh (batasan browser).');else $('#f').click()}
     p.up=false}
   p.down=down}
@@ -189,7 +196,7 @@ function hands(){
   if(screen==='game'&&res&&res.landmarks)for(const L of res.landmarks){
     const a=L[4],b=L[8],sc=Math.hypot(L[0].x-L[9].x,L[0].y-L[9].y)+1e-6;
     const ra=Math.hypot(a.x-b.x,a.y-b.y)/sc,nx=1-(a.x+b.x)/2,ny=(a.y+b.y)/2;
-    dets.push([ME.x+cl((nx-MARG)/(1-2*MARG))*PW,ME.y+cl((ny-MARG)/(1-2*MARG))*PH,ra])}
+    dets.push([PAN.x+cl((nx-MARG)/(1-2*MARG))*PW,PAN.y+cl((ny-MARG)/(1-2*MARG))*PH,ra])}
   const avail=Object.keys(ptr).filter(k=>k[0]==='h'),seen=new Set();
   for(let [tx,ty,ra] of dets){
     let best=null;for(const k of avail){const d=dist([tx,ty],[ptr[k].x,ptr[k].y]);if(d<300&&(!best||d<best[0]))best=[d,k]}
@@ -204,7 +211,6 @@ function hands(){
 let peer=null,conn=null,code=null,role='';
 const ALPHA='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const rcode=()=>Array.from({length:5},()=>ALPHA[Math.floor(Math.random()*ALPHA.length)]).join('');
-
 function attachCall(call){
   call.on('stream',s=>{rv.srcObject=s;rv.play().catch(()=>{});remoteOK=true});
   call.on('close',()=>{remoteOK=false;rv.srcObject=null});
@@ -218,17 +224,16 @@ async function callHost(){
   const s=await outStream();
   attachCall(peer.call('ppz-'+code,s));
 }
-
 let lastSeen=0,wasOn=false;
 function friendOn(){return !!(conn&&conn.open&&performance.now()-lastSeen<6000)}
 function enterGame(){if(screen!=='game'){screen='game';$('#welcome').style.display='none';t0=performance.now()}}
 function setConn(c){
   conn=c;
   c.on('open',()=>{lastSeen=performance.now();enterGame();updateBar();
-    if(role==='host'&&imgData)c.send({t:'start',img:imgData});
+    if(role==='host'&&imgData)c.send(startMsg());
     if(role==='guest')callHost()});
   c.on('data',onData);
-  c.on('close',()=>{if(conn===c){conn=null;fr=mkState();frCur=[];remoteOK=false;rv.srcObject=null;updateBar();
+  c.on('close',()=>{if(conn===c){conn=null;frCur=[];rheld={};remoteOK=false;rv.srcObject=null;updateBar();
     if(role==='guest')setTimeout(reconnect,2000)}});
   c.on('error',()=>{});
 }
@@ -240,11 +245,12 @@ function reconnect(){
 }
 function onData(m){
   lastSeen=performance.now();
-  if(m.t==='start'){const im=new Image();im.onload=()=>begin(im,m.img,true);im.src=m.img}
+  if(m.t==='start'){const im=new Image();im.onload=()=>begin(im,m.img,true,m);im.src=m.img}
   else if(m.t==='s'){
-    const f=mkState();m.pl.forEach(i=>f.placed[i]=true);
-    m.tr.forEach(([i,a,b,h])=>{f.tray.push(i);f.pos[i]=[a,b];if(h)f.held.add(i)});
-    fr=f;frCur=m.cu||[];frDone=!!m.d;if(frDone&&!winner)winner='fr'}
+    if(m.g!==gid)return;
+    (m.pl||[]).forEach(i=>{placed[i]=true});
+    rheld={};(m.hd||[]).forEach(([i,a,b])=>{rheld[i]=[a,b]});
+    frCur=m.cu||[];calcTray()}
 }
 function hostRoom(){
   role='host';code=rcode();
@@ -278,12 +284,12 @@ setInterval(()=>{
   if(on!==wasOn){wasOn=on;toast(on?'Teman bergabung!':'Teman terputus')}
   updateBar();
 },1000);
+// sinkron papan bersama 10x per detik
 setInterval(()=>{
-  if(!conn||!conn.open||screen!=='game')return;
-  conn.send({t:'s',pl:me.placed.flatMap((v,i)=>v?[i]:[]),
-    tr:me.tray.map(i=>[i,Math.round(me.pos[i][0]),Math.round(me.pos[i][1]),me.held.has(i)?1:0]),
-    cu:Object.entries(ptr).filter(([k,p])=>k!=='mouse'||p.down).map(([k,p])=>[Math.round(p.x-ME.x),Math.round(p.y-ME.y),p.down?1:0]),
-    d:winner==='me'||tFin?1:0});
+  if(!conn||!conn.open||screen!=='game'||!sprites.length)return;
+  conn.send({t:'s',g:gid,pl:placedList(),
+    hd:Object.entries(hpos).map(([i,p])=>[+i,Math.round(p[0]),Math.round(p[1])]),
+    cu:Object.entries(ptr).filter(([k,p])=>k!=='mouse'||p.down).map(([k,p])=>[Math.round(p.x-PAN.x),Math.round(p.y-PAN.y),p.down?1:0])});
 },100);
 const q=new URLSearchParams(location.search).get('room');
 if(q){$('#code').value=q.toUpperCase();joinRoom(q)}else hostRoom();
@@ -291,37 +297,34 @@ if(q){$('#code').value=q.toUpperCase();joinRoom(q)}else hostRoom();
 // ---------- gambar
 function person(cx,cy,s){x.fillStyle='#e6e6e6';x.beginPath();x.arc(cx,cy-s*.3,s*.32,0,7);x.fill();
   x.beginPath();x.ellipse(cx,cy+s*.75,s*.55,s*.42,0,Math.PI,0);x.fill()}
-function drawPanel(P,S,mine){
-  x.save();x.translate(P.x,P.y);
+function piece(i,p,lift){
+  if(lift){x.fillStyle='rgba(0,0,0,.15)';x.beginPath();x.arc(p[0]+3,p[1]+5,R,0,7);x.fill()}
+  x.drawImage(sprites[i],p[0]-R,p[1]-R)}
+function drawPanel(){
+  x.save();x.translate(PAN.x,PAN.y);
   rr(0,0,PW,PH,18);x.lineWidth=5;x.strokeStyle=C.beige;x.stroke();
-  x.textBaseline='middle';x.textAlign='center';x.font='30px Chewy,system-ui';x.fillStyle=mine?C.blue:C.coral;
-  x.fillText(mine?'KAMU':'TEMAN',PW/2,28);
-  if(!mine&&!friendOn()){
-    person(PW/2,PH/2-10,110);x.fillStyle=C.gray;x.font='28px Chewy,system-ui';
-    x.fillText(role==='host'?'Menunggu teman... kode: '+code:'Menyambung ke teman...',PW/2,PH-40);x.restore();return}
+  x.textBaseline='middle';x.textAlign='center';x.font='30px Chewy,system-ui';x.fillStyle=C.blue;
+  x.fillText(friendOn()?'KALIAN BERDUA':'Menunggu teman... kode: '+code,PW/2-20,28);
   if(preview){x.drawImage(preview,PREV[0],PREV[1]);x.lineWidth=3;x.strokeStyle=C.blue;x.strokeRect(PREV[0],PREV[1],PREV[2],PREV[3])}
   x.textAlign='left';x.font='34px Chewy,system-ui';x.fillStyle=C.blue;
-  x.fillText(S.placed.filter(Boolean).length+' / '+N,PREV[0]+PREV[2]+14,PREV[1]+36);
-  if(mine){
-    if(!sprites.length){x.fillStyle=C.gray;x.font='32px Chewy,system-ui';x.textAlign='center';x.fillText('Upload foto untuk mulai (tombol kanan bawah)',PW/2,PH/2)}
-    x.lineWidth=4;x.strokeStyle=C.blue;rr(...BACK,10);x.stroke();
-    x.beginPath();x.moveTo(BACK[0]+38,BACK[1]+26);x.lineTo(BACK[0]+14,BACK[1]+26);x.moveTo(BACK[0]+24,BACK[1]+16);x.lineTo(BACK[0]+14,BACK[1]+26);x.lineTo(BACK[0]+24,BACK[1]+36);x.stroke();
-    x.fillStyle=C.btn;x.fillRect(...UP);x.fillStyle='#fff';x.font='17px Chewy,system-ui';x.textAlign='center';
-    ['UPLOAD','FOTO','BARU'].forEach((t,i)=>x.fillText(t,UP[0]+UP[2]/2,UP[1]+16+i*20));
-    if(winner==='fr'&&!tFin){x.fillStyle=C.coral;x.font='26px Chewy,system-ui';x.textAlign='center';x.fillText('Teman sudah selesai!',PW/2+60,PREV[1]+36)}
-  }
-  if(sprites.length){
-    for(let i=0;i<N;i++)if(!S.placed[i]){x.globalAlpha=.16;x.drawImage(sprites[i],targets[i][0]-R,targets[i][1]-R);x.globalAlpha=1;
+  x.fillText(placed.filter(Boolean).length+' / '+N,PREV[0]+PREV[2]+14,PREV[1]+36);
+  x.lineWidth=4;x.strokeStyle=C.blue;rr(...BACK,10);x.stroke();
+  x.beginPath();x.moveTo(BACK[0]+38,BACK[1]+26);x.lineTo(BACK[0]+14,BACK[1]+26);x.moveTo(BACK[0]+24,BACK[1]+16);x.lineTo(BACK[0]+14,BACK[1]+26);x.lineTo(BACK[0]+24,BACK[1]+36);x.stroke();
+  x.fillStyle=C.btn;x.fillRect(...UP);x.fillStyle='#fff';x.font='17px Chewy,system-ui';x.textAlign='center';
+  ['UPLOAD','FOTO','BARU'].forEach((t,i)=>x.fillText(t,UP[0]+UP[2]/2,UP[1]+16+i*20));
+  if(!sprites.length){x.fillStyle=C.gray;x.font='32px Chewy,system-ui';x.fillText('Upload foto untuk mulai (tombol biru)',PW/2,PH/2)}
+  else{
+    for(let i=0;i<N;i++)if(!placed[i]){x.globalAlpha=.16;x.drawImage(sprites[i],targets[i][0]-R,targets[i][1]-R);x.globalAlpha=1;
       x.beginPath();x.arc(targets[i][0],targets[i][1],R,0,7);x.lineWidth=1;x.strokeStyle='#e2e2e2';x.stroke()}
-    for(let i=0;i<N;i++)if(S.placed[i])x.drawImage(sprites[i],targets[i][0]-R,targets[i][1]-R);
-    for(const i of S.tray){const p=S.pos[i];
-      if(S.held.has(i)){x.fillStyle='rgba(0,0,0,.15)';x.beginPath();x.arc(p[0]+3,p[1]+5,R,0,7);x.fill()}
-      x.drawImage(sprites[i],p[0]-R,p[1]-R)}
+    for(let i=0;i<N;i++)if(placed[i])x.drawImage(sprites[i],targets[i][0]-R,targets[i][1]-R);
+    for(const i of trayVis)if(!hpos[i]&&!rheld[i])piece(i,SLOTS[oidx[i]%TRAYN],0);
+    for(const i of trayVis)if(rheld[i]&&!hpos[i])piece(i,rheld[i],1);
+    for(const i of trayVis)if(hpos[i])piece(i,hpos[i],1);
   }
-  if(!mine)for(const c of frCur){x.beginPath();x.arc(c[0],c[1],12,0,7);x.lineWidth=3;x.strokeStyle=C.coral;
-    if(c[2]){x.fillStyle=C.coral;x.fill()}else x.stroke()}
-  if(mine&&tFin){x.fillStyle='rgba(255,255,255,.88)';rr(30,PH/2-60,PW-60,120,24);x.fill();
-    colorText(winner==='me'?(friendOn()?'KAMU MENANG!':'SELESAI!'):'TEMAN MENANG!',PW/2,PH/2,64)}
+  for(const c of frCur){x.beginPath();x.arc(c[0],c[1],14,0,7);x.lineWidth=3;x.strokeStyle=C.purple;
+    if(c[2]){x.fillStyle=C.purple;x.fill()}else x.stroke()}
+  if(tFin){x.fillStyle='rgba(255,255,255,.88)';rr(30,PH/2-60,PW-60,120,24);x.fill();
+    colorText(friendOn()?'KALIAN BERHASIL!':'SELESAI!',PW/2,PH/2,64)}
   x.restore();
 }
 function drawRemoteCam(){
@@ -359,7 +362,7 @@ function drawCam(){
   x.restore();
 }
 function cursors(){
-  for(const k in ptr){const p=ptr[k];if(k==='mouse'&&!p.down&&!p.held)continue;
+  for(const k in ptr){const p=ptr[k];if(k==='mouse'&&!p.down&&p.held==null)continue;
     x.beginPath();x.arc(p.x,p.y,15,0,7);x.lineWidth=3;x.strokeStyle=k==='mouse'?C.gray:(p.down?C.coral:C.blue);
     if(p.down){x.fillStyle=x.strokeStyle;x.fill()}else x.stroke();
     x.beginPath();x.arc(p.x,p.y,4,0,7);x.fillStyle='#fff';x.fill()}
@@ -367,8 +370,13 @@ function cursors(){
 function frame(){
   try{
     hands();
+    // lepas potongan yang sudah dipasang teman lebih dulu
+    for(const k in ptr){const p=ptr[k];if(p.held!=null&&placed[p.held]){delete hpos[p.held];p.held=null}}
+    for(const k in hpos)if(placed[k])delete hpos[k];
+    calcTray();
+    if(!tFin&&sprites.length&&placed.every(Boolean))tFin=performance.now();
     x.clearRect(0,0,W,H);
-    if(screen==='game'){drawRemoteCam();drawCam();drawPanel(FR,fr,false);drawPanel(ME,me,true);cursors()}
+    if(screen==='game'){drawRemoteCam();drawCam();drawPanel();cursors()}
   }catch(e){console.error(e)}
   requestAnimationFrame(frame);
 }
