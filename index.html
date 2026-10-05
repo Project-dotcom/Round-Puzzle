@@ -2,14 +2,14 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Puzzle Bulat Online</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Puzzle Bulat</title>
 <link href="https://fonts.googleapis.com/css2?family=Chewy&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
 :root{--blue:#64a3c8;--purple:#c486be;--coral:#f06e7d;--beige:#dec4af;--btn:#4eaffc;--u:1px}
-html,body{margin:0;height:100%;background:#fff;overflow:hidden;font-family:'Chewy',system-ui,sans-serif}
-#stage{position:relative;width:min(100vw,calc(100vh*16/9));aspect-ratio:16/9;margin:0 auto;top:50%;transform:translateY(-50%)}
+html,body{margin:0;height:100%;height:100dvh;background:#fff;overflow:hidden;overscroll-behavior:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;font-family:'Chewy',system-ui,sans-serif}
+#stage{position:relative;width:min(100vw,calc(100vh*16/9));width:min(calc(100vw - env(safe-area-inset-left,0px) - env(safe-area-inset-right,0px)),calc(100dvh*16/9));aspect-ratio:16/9;margin:0 auto;top:50%;transform:translateY(-50%)}
 canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:calc(var(--u)*36);background:#fff}
 #title{margin:0;display:flex;font-size:calc(var(--u)*175);line-height:1}
@@ -17,11 +17,14 @@ canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #up{display:flex;align-items:center;cursor:pointer;background:var(--btn);color:#fff;border-radius:999px;height:calc(var(--u)*112);padding:0 calc(var(--u)*80) 0 0;font-size:calc(var(--u)*74)}
 #up i{width:calc(var(--u)*112);height:calc(var(--u)*112);margin-right:calc(var(--u)*34);border-radius:50%;background:#fff;box-sizing:border-box;border:calc(var(--u)*5) solid var(--btn);display:grid;place-items:center;color:var(--btn);font-style:normal;font-size:calc(var(--u)*80)}
 #join{display:flex;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*34);color:#777}
-#join input{font:inherit;width:calc(var(--u)*230);text-align:center;text-transform:uppercase;border:calc(var(--u)*4) solid var(--beige);border-radius:calc(var(--u)*16);padding:calc(var(--u)*8)}
+#join input{user-select:text;-webkit-user-select:text;font:inherit;width:calc(var(--u)*230);text-align:center;text-transform:uppercase;border:calc(var(--u)*4) solid var(--beige);border-radius:calc(var(--u)*16);padding:calc(var(--u)*8)}
 button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26)}
 #hint{margin:0;font-size:calc(var(--u)*28);color:#888;text-align:center;max-width:70%}
 #bar{position:absolute;left:2%;top:2%;display:none;gap:calc(var(--u)*14);align-items:center;font-size:calc(var(--u)*28);color:var(--blue);z-index:2}
 #toast{position:absolute;left:50%;top:3%;transform:translateX(-50%);background:var(--coral);color:#fff;padding:calc(var(--u)*10) calc(var(--u)*26);border-radius:calc(var(--u)*16);font-size:calc(var(--u)*28);display:none;z-index:3}
+#rotate{display:none;position:fixed;inset:0;z-index:10;background:#fff;color:var(--blue);flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;font-size:26px;padding:24px}
+#rotate b{font-size:80px;font-weight:400}
+@media (orientation:portrait) and (max-width:700px){#rotate{display:flex}}
 .hv{position:fixed;left:0;top:0;width:160px;height:90px;opacity:0;pointer-events:none;z-index:-1}
 </style>
 </head>
@@ -32,11 +35,12 @@ button{font:inherit;cursor:pointer;border:0;border-radius:calc(var(--u)*16);back
     <h1 id="title"></h1>
     <label id="up" for="f"><i>&#8593;</i>UPLOAD</label>
     <div id="join">atau gabung ke teman: <input id="code" maxlength="5" placeholder="KODE"><button id="joinBtn">GABUNG</button></div>
-    <p id="hint">Upload foto untuk mulai. Kalian akan menyusun 1 puzzle yang sama secara bersamaan.</p>
+    <p id="hint">Upload foto untuk mulai.</p>
   </div>
   <div id="bar"><span id="barTxt"></span><button id="copy">Salin link undangan</button></div>
   <div id="toast"></div>
 </div>
+<div id="rotate"><b>&#8635;</b>Putar HP ke mode landscape (miring) agar game tampil penuh</div>
 <input type="file" id="f" accept="image/*" hidden>
 <video id="v" class="hv" playsinline muted autoplay></video>
 <video id="rv" class="hv" playsinline muted autoplay></video>
@@ -67,7 +71,9 @@ const inR=(p,r)=>p[0]>=r[0]&&p[0]<=r[0]+r[2]&&p[1]>=r[1]&&p[1]<=r[1]+r[3];
 function rr(a,b,w,h,r){x.beginPath();x.roundRect(a,b,w,h,r)}
 function toast(t){const e=$('#toast');e.textContent=t;e.style.display='block';clearTimeout(toast.t);toast.t=setTimeout(()=>e.style.display='none',3500)}
 function fit(){stage.style.setProperty('--u',stage.clientWidth/1600+'px')}
-addEventListener('resize',fit);fit();
+addEventListener('resize',fit);addEventListener('orientationchange',()=>setTimeout(fit,200));fit();
+addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')return;const d=document.documentElement;
+  (d.requestFullscreen&&!document.fullscreenElement?d.requestFullscreen():Promise.reject()).then(()=>window.screen.orientation&&window.screen.orientation.lock('landscape')).catch(()=>{})},{once:true});
 $('#title').innerHTML=[...'WELCOME'].map((c,i)=>`<span style="color:${COL3[i%3]};transform:rotate(${[-6,4,-3,5,-4,3,-5][i]}deg)">${c}</span>`).join('');
 function colorText(t,cx,cy,size){x.font=`${size}px Chewy,system-ui`;x.textAlign='left';x.textBaseline='middle';
   const ws=[...t].map(c=>x.measureText(c).width),tot=ws.reduce((a,b)=>a+b,0);let px=cx-tot/2;
@@ -303,8 +309,7 @@ function piece(i,p,lift){
 function drawPanel(){
   x.save();x.translate(PAN.x,PAN.y);
   rr(0,0,PW,PH,18);x.lineWidth=5;x.strokeStyle=C.beige;x.stroke();
-  x.textBaseline='middle';x.textAlign='center';x.font='30px Chewy,system-ui';x.fillStyle=C.blue;
-  x.fillText(friendOn()?'KALIAN BERDUA':'Menunggu teman... kode: '+code,PW/2-20,28);
+  x.textBaseline='middle';
   if(preview){x.drawImage(preview,PREV[0],PREV[1]);x.lineWidth=3;x.strokeStyle=C.blue;x.strokeRect(PREV[0],PREV[1],PREV[2],PREV[3])}
   x.textAlign='left';x.font='34px Chewy,system-ui';x.fillStyle=C.blue;
   x.fillText(placed.filter(Boolean).length+' / '+N,PREV[0]+PREV[2]+14,PREV[1]+36);
