@@ -82,16 +82,15 @@ function colorText(t,cx,cy,size){x.font=`${size}px Chewy,system-ui`;x.textAlign=
   [...t].forEach((c,i)=>{x.strokeText(c,px,cy);px+=ws[i]});px=cx-tot/2;
   [...t].forEach((c,i)=>{x.fillStyle=COL3[i%3];x.fillText(c,px,cy);px+=ws[i]})}
 
-// ---------- state puzzle BERSAMA (1 papan untuk 2 pemain)
+
 let sprites=[],targets=[],preview=null,screen='welcome',t0=0,tFin=0,imgData=null;
 let gid=0,ord=[],oidx=[],placed=Array(N).fill(false);
-const hpos={};          // potongan yang sedang kupegang: i -> [x,y]
-let rheld={};  // potongan yang dipegang semua teman (digabung tiap frame)
+const hpos={};        
+let rheld={}; 
 let trayVis=[];
 const placedList=()=>placed.flatMap((v,i)=>v?[i]:[]);
 const curPos=i=>hpos[i]||rheld[i]||SLOTS[oidx[i]%TRAYN];
-// Potongan ke-k di urutan acak menempati slot k%TRAYN; slot menampilkan potongan pertama yang belum terpasang.
-// Karena deterministik, kedua pemain selalu melihat isi baki yang sama tanpa perlu sinkron tambahan.
+
 function calcTray(){trayVis=[];if(!ord.length)return;const seen=new Set();
   for(const i of ord){if(placed[i])continue;const s=oidx[i]%TRAYN;if(!seen.has(s)){seen.add(s);trayVis.push(i)}}}
 
@@ -140,7 +139,7 @@ $('#f').addEventListener('change',e=>{
     im.onerror=()=>toast('Gagal membuka gambar');im.src=rd.result};
   rd.readAsDataURL(file)});
 
-// ---------- pointer (tangan / mouse / sentuh)
+
 const ptr={};let hid=0;
 function upd(id,px,py,down){
   const p=ptr[id]||(ptr[id]={x:px,y:py,down:false,held:null,up:false});p.x=px;p.y=py;
@@ -166,7 +165,7 @@ cv.addEventListener('pointermove',e=>{if(screen!=='game')return;const[a,b]=lp(e)
 const pup=e=>{if(screen!=='game')return;const[a,b]=lp(e),id=pid(e);if(!ptr[id])return;upd(id,a,b,false);if(id!=='mouse')delete ptr[id]};
 cv.addEventListener('pointerup',pup);cv.addEventListener('pointercancel',pup);
 
-// ---------- kamera + tangan
+
 let hl=null,camOK=false,lastT=-1,res=null,hstatus='Memuat kamera...',camErr='',camHelp='',localStream=null,remoteOK=false;
 const HELP={NotAllowedError:'Izin kamera diblokir: klik ikon gembok di address bar, izinkan Kamera, lalu klik kotak ini',
   NotFoundError:'Tidak ada kamera terdeteksi di perangkat ini',
@@ -214,9 +213,9 @@ function hands(){
   for(const k of Object.keys(ptr))if(k[0]==='h'&&!seen.has(k)){upd(k,ptr[k].x,ptr[k].y,false);delete ptr[k]}
 }
 
-// ---------- online (PeerJS / WebRTC, mesh maksimal 3 pemain)
+
 let peer=null,code=null,role='';
-const MAXF=2;                       // maksimal 2 teman (+ kamu = 3 pemain)
+const MAXF=2;                      
 const friends={},streams={};
 const flist=()=>Object.values(friends);
 const bcast=m=>flist().forEach(f=>{if(f.c.open){try{f.c.send(m)}catch(e){}}});
@@ -306,7 +305,7 @@ setInterval(()=>{
   for(const f of flist())if(now-f.seen>5000)removeFriend(f.id);
   updateBar();
 },1000);
-// sinkron papan bersama 10x per detik
+
 setInterval(()=>{
   if(!flist().length||screen!=='game'||!sprites.length)return;
   bcast({t:'s',g:gid,pl:placedList(),
@@ -317,7 +316,7 @@ addEventListener('pagehide',()=>{bcast({t:'bye'});try{peer&&peer.destroy()}catch
 const q=new URLSearchParams(location.search).get('room');
 if(q){$('#code').value=q.toUpperCase();joinRoom(q)}else hostRoom();
 
-// ---------- gambar
+
 function person(cx,cy,s){x.fillStyle='#e6e6e6';x.beginPath();x.arc(cx,cy-s*.3,s*.32,0,7);x.fill();
   x.beginPath();x.ellipse(cx,cy+s*.75,s*.55,s*.42,0,Math.PI,0);x.fill()}
 function piece(i,p,lift){
@@ -396,7 +395,6 @@ function cursors(){
 function frame(){
   try{
     hands();
-    // lepas potongan yang sudah dipasang teman lebih dulu
     for(const k in ptr){const p=ptr[k];if(p.held!=null&&placed[p.held]){delete hpos[p.held];p.held=null}}
     for(const k in hpos)if(placed[k])delete hpos[k];
     rheld={};for(const f of flist())for(const k in f.held)rheld[k]=f.held[k];
